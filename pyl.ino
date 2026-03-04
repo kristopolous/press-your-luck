@@ -37,12 +37,9 @@ const short boardNotes[] = {
 
 float currentHz   = 340.0f;
 float targetHz    = 330.0f;
+bool  maxmode = false;
 bool  notePending = false;
 short btnix = 0;
-void setNote(float hz) {
-  targetHz    = hz;
-  notePending = true;
-}
 static byte board_off[]={0,1,2,3,4,7,8,11,12,13,14,15};
 static byte dir = 1;
 
@@ -83,8 +80,25 @@ short boardState[16] = {0};
 
 int maxvalue = 1999;
 
-
-
+const byte penguin[17][2] PROGMEM = {
+  {0b00000000, 0b00000000},  // ................
+  {0b00000011, 0b11000000},  // ##............##
+  {0b00000111, 0b11100000},  // ###..........###
+  {0b00001111, 0b11110000},  // ####........####
+  {0b00011111, 0b11111000},  // #####......#####
+  {0b00011111, 0b11111000},  // #####......#####
+  {0b00011101, 0b10111000},  // #.###......###.#
+  {0b00011111, 0b11111000},  // #####......#####
+  {0b01111100, 0b00111110},  // ..#####..#####..
+  {0b11111110, 0b01111111},  // .##############.
+  {0b00011001, 0b10011000},  // #..##......##..#
+  {0b00010000, 0b00001000},  // ....#......#....
+  {0b00010000, 0b00001000},  // ....#......#....
+  {0b00001111, 0b11110000},  // ####........####
+  {0b00000010, 0b01000000},  // .#............#.
+  {0b00000110, 0b01100000},  // .##..........##.
+  {0b00000000, 0b00000000},  // ................
+};
 void line(int off, int id, int row) {
   lc[off].setRow(id, row, B11111111);
 }
@@ -92,6 +106,16 @@ void unline(int off, int id, int row) {
   lc[off].setRow(id, row, 0);
 }
 
+void showPenguin(int ox, int oy) {
+  for (int y = 0; y < 17; y++) {
+    byte lo = pgm_read_byte(&penguin[y][0]);
+    byte hi = pgm_read_byte(&penguin[y][1]);
+    int disp_y = (oy + y) >> 3;
+    int row    = (oy + y) & 7;
+    lc[disp_y].setRow(2, row, lo);  // left half
+    lc[disp_y].setRow(1, row, hi);  // right half
+  }
+}
 void displayNumber(int off, int id, int number, int start, bool big) {
   byte thousands  = (number / 1000);
   byte hundreds   = (number / 100) % 10;
@@ -214,21 +238,33 @@ void loop() {
   static unsigned long lastStep = 0;
   static short cidx = 0;
   unsigned long now = millis();
-
+  static long prev_value;
+  
   if (digitalRead(BTN_STOP) == HIGH) {
     prepBig(5);
     running = false;
     cidx = 0;
     dir = 1;
+    if(digitalRead(BTN_START) == HIGH) {
+      maxmode = true;
+      for (int i=0; i < 16; i++) {
+        lc[i>>2].clearDisplay(i%4);
+      }
+    } 
   }
   if (digitalRead(BTN_START) == HIGH) {
     prepBig(0);
+    maxmode = false;
     running = true;
     cidx = 0;
   }
   num++;
-    
-  if (!running) {
+  if (maxmode) {
+    maxvalue = map(mozziAnalogRead(A3), 0, 1023, 25, 2000);
+    prev_value = maxvalue;
+    displayNumber(0,3,maxvalue/100,0,false);
+    displayNumber(0,2,maxvalue%100,0,false);
+  } else if (!running) {
     if (now - lastStep >= 145) {
       lastStep = now;
       if (boardState[selector] > 0) {
@@ -241,10 +277,19 @@ void loop() {
         } else {
           cidx++;
         }
-        setNote((float)boardNotes[num%16]*((num>>6)%4+1)/6);
+        targetHz = (float)boardNotes[num%16]*((num>>6)%4+1)/6;
+        notePending = true;
+      }
+      else {
+        showPenguin(8,abs(cidx)%3+5);
+        cidx++;
+
+        if(cidx>2) {
+          cidx=-3;
+        }
       }
     }
-  } else if (now - lastStep >= 155) {
+  } else if (now - lastStep >= 150) {
     int tmp = cidx + CHANGE;
     lastStep = now;
     for (; cidx < tmp; cidx++) {
@@ -267,7 +312,8 @@ void loop() {
     lc[selector>>2].setIntensity(selector%4,5);
     line(selector>>2,selector%4,7);
 
-    setNote((float)boardNotes[num%16]*((num>>6)%5+2)/6 + boardState[selector]/10);
+    targetHz = (float)boardNotes[num%16]*((num>>6)%5+2)/6 + boardState[selector]/10;
+    notePending = true;
   }
   return;
   
